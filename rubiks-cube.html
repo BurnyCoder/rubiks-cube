@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rubik's Cube Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Inter', sans-serif; background-color: #f0f0f0; }
+        #container { width: 100vw; height: 100vh; display: flex; flex-direction: column; align-items: center; }
+        #canvas-container { flex-grow: 1; width: 100%; max-width: 800px; /* Max width for the canvas */ position: relative; }
+        canvas { display: block; width: 100%; height: 100%; }
+        #controls {
+            padding: 1rem;
+            background-color: rgba(255, 255, 255, 0.9);
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-top: 1rem; /* Add margin for spacing */
+            margin-bottom: 1rem;
+            display: grid;
+            grid-template-columns: repeat(6, 1fr); /* 6 columns for moves */
+            gap: 0.5rem;
+            max-width: 90%; /* Limit control width on large screens */
+            overflow-x: auto; /* Allow scrolling on small screens */
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.25rem;
+        }
+        .control-group span {
+            font-weight: bold;
+            margin-bottom: 0.25rem;
+        }
+         .control-group button {
+            padding: 0.5rem 0.75rem;
+            border: none;
+            border-radius: 0.375rem; /* rounded-md */
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+            min-width: 40px; /* Ensure buttons have minimum width */
+        }
+        .control-group button:hover {
+            opacity: 0.9;
+        }
+        /* Specific colors for buttons */
+        .bg-red-500:hover { background-color: #dc2626; } /* hover:bg-red-600 */
+        .bg-orange-500:hover { background-color: #ea580c; } /* hover:bg-orange-600 */
+        .bg-blue-500:hover { background-color: #2563eb; } /* hover:bg-blue-600 */
+        .bg-green-500:hover { background-color: #16a34a; } /* hover:bg-green-600 */
+        .bg-yellow-400 { background-color: #facc15; color: #444; } /* Use darker text for yellow */
+        .bg-yellow-400:hover { background-color: #eab308; } /* hover:bg-yellow-500 */
+        .bg-gray-300 { background-color: #d1d5db; color: #444; } /* Use darker text for white/gray */
+        .bg-gray-300:hover { background-color: #9ca3af; } /* hover:bg-gray-400 */
+
+        /* Responsive adjustments */
+        @media (max-width: 640px) {
+             #controls {
+                grid-template-columns: repeat(3, 1fr); /* 3 columns on smaller screens */
+             }
+        }
+         @media (max-width: 400px) {
+             #controls {
+                grid-template-columns: repeat(2, 1fr); /* 2 columns on very small screens */
+             }
+              .control-group button {
+                 padding: 0.4rem 0.6rem;
+                 font-size: 0.9rem;
+             }
+        }
+
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="canvas-container">
+            </div>
+        <div id="controls">
+            <div class="control-group">
+                <span>Front (F)</span>
+                <button class="bg-blue-500" onclick="rotateFace('F')">F</button>
+                <button class="bg-blue-500" onclick="rotateFace('F\'')">F'</button>
+            </div>
+             <div class="control-group">
+                <span>Back (B)</span>
+                <button class="bg-green-500" onclick="rotateFace('B')">B</button>
+                <button class="bg-green-500" onclick="rotateFace('B\'')">B'</button>
+            </div>
+            <div class="control-group">
+                <span>Up (U)</span>
+                <button class="bg-yellow-400" onclick="rotateFace('U')">U</button>
+                <button class="bg-yellow-400" onclick="rotateFace('U\'')">U'</button>
+            </div>
+             <div class="control-group">
+                <span>Down (D)</span>
+                 <button class="bg-gray-300" onclick="rotateFace('D')">D</button>
+                <button class="bg-gray-300" onclick="rotateFace('D\'')">D'</button>
+            </div>
+            <div class="control-group">
+                <span>Left (L)</span>
+                <button class="bg-orange-500" onclick="rotateFace('L')">L</button>
+                <button class="bg-orange-500" onclick="rotateFace('L\'')">L'</button>
+            </div>
+            <div class="control-group">
+                <span>Right (R)</span>
+                <button class="bg-red-500" onclick="rotateFace('R')">R</button>
+                <button class="bg-red-500" onclick="rotateFace('R\'')">R'</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.163.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.163.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- Scene Setup ---
+        let scene, camera, renderer, controls;
+        let cubeGroup; // Group to hold all the cubies
+        let cubies = []; // Array to store individual cubies
+        const CUBIE_SIZE = 1;
+        const CUBIE_GAP = 0.05; // Small gap between cubies
+        const CUBE_DIM = 3; // 3x3x3 cube
+
+        // --- Rotation State ---
+        let isRotating = false; // Flag to prevent multiple rotations at once
+        const ROTATION_SPEED = 0.05; // Radians per frame for animation
+        let rotationQueue = []; // Queue for pending rotations
+
+        // --- Colors (Standard Rubik's Cube Colors) ---
+        const colors = {
+            white:  0xffffff, // Or use a light gray like 0xd1d5db for better visibility
+            yellow: 0xfacc15,
+            blue:   0x3b82f6,
+            green:  0x22c55e,
+            red:    0xef4444,
+            orange: 0xf97316,
+            black:  0x111827 // Inner color
+        };
+
+        // --- Initialization ---
+        function init() {
+            // Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xf0f0f0); // Light gray background
+
+            // Camera
+            const canvasContainer = document.getElementById('canvas-container');
+            const aspect = canvasContainer.clientWidth / canvasContainer.clientHeight;
+            camera = new THREE.PerspectiveCamera(75, aspect, 0.1, 1000);
+            camera.position.set(4, 4, 6); // Position camera to view the cube
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(canvasContainer.clientWidth, canvasContainer.clientHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            canvasContainer.appendChild(renderer.domElement);
+
+            // Lights
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.8); // Soft white light
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.7);
+            directionalLight.position.set(5, 10, 7.5);
+            scene.add(directionalLight);
+
+            // Controls
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true; // an animation loop is required when either damping or auto-rotation are enabled
+            controls.dampingFactor = 0.05;
+            controls.screenSpacePanning = false;
+            controls.minDistance = 5;
+            controls.maxDistance = 20;
+            controls.maxPolarAngle = Math.PI / 2 + 0.5; // Allow looking slightly from below
+
+
+            // Create the Rubik's Cube
+            createCube();
+
+            // Handle window resize
+            window.addEventListener('resize', onWindowResize, false);
+
+            // Start the animation loop
+            animate();
+        }
+
+        // --- Create Cube Geometry and Materials ---
+        function createCube() {
+            cubeGroup = new THREE.Group();
+            cubies = []; // Clear previous cubies if any
+
+            const totalSize = CUBIE_SIZE * CUBE_DIM + CUBIE_GAP * (CUBE_DIM - 1);
+            const offset = (totalSize - CUBIE_SIZE) / 2; // To center the cube at (0,0,0)
+
+            const geometry = new THREE.BoxGeometry(CUBIE_SIZE, CUBIE_SIZE, CUBIE_SIZE);
+
+            for (let x = 0; x < CUBE_DIM; x++) {
+                for (let y = 0; y < CUBE_DIM; y++) {
+                    for (let z = 0; z < CUBE_DIM; z++) {
+                        // Skip the inner core cubie (not visible)
+                        if (x > 0 && x < CUBE_DIM - 1 && y > 0 && y < CUBE_DIM - 1 && z > 0 && z < CUBE_DIM - 1) {
+                            continue;
+                        }
+
+                        // --- Determine Face Colors ---
+                        // Order: +X (Right), -X (Left), +Y (Up), -Y (Down), +Z (Front), -Z (Back)
+                        const materials = [
+                            (x === CUBE_DIM - 1) ? new THREE.MeshLambertMaterial({ color: colors.red })    : new THREE.MeshLambertMaterial({ color: colors.black }), // Right (+X) Red
+                            (x === 0)            ? new THREE.MeshLambertMaterial({ color: colors.orange }) : new THREE.MeshLambertMaterial({ color: colors.black }), // Left (-X) Orange
+                            (y === CUBE_DIM - 1) ? new THREE.MeshLambertMaterial({ color: colors.yellow }) : new THREE.MeshLambertMaterial({ color: colors.black }), // Up (+Y) Yellow
+                            (y === 0)            ? new THREE.MeshLambertMaterial({ color: colors.white })  : new THREE.MeshLambertMaterial({ color: colors.black }), // Down (-Y) White
+                            (z === CUBE_DIM - 1) ? new THREE.MeshLambertMaterial({ color: colors.blue })   : new THREE.MeshLambertMaterial({ color: colors.black }), // Front (+Z) Blue
+                            (z === 0)            ? new THREE.MeshLambertMaterial({ color: colors.green })  : new THREE.MeshLambertMaterial({ color: colors.black }), // Back (-Z) Green
+                        ];
+
+                        const cubie = new THREE.Mesh(geometry, materials);
+
+                        // Calculate position with gaps
+                        cubie.position.set(
+                            x * (CUBIE_SIZE + CUBIE_GAP) - offset,
+                            y * (CUBIE_SIZE + CUBIE_GAP) - offset,
+                            z * (CUBIE_SIZE + CUBIE_GAP) - offset
+                        );
+
+                        // Store original position for rotation logic
+                        cubie.userData.originalX = x;
+                        cubie.userData.originalY = y;
+                        cubie.userData.originalZ = z;
+                        // Store current logical position (initially same as original)
+                        cubie.userData.currentX = x;
+                        cubie.userData.currentY = y;
+                        cubie.userData.currentZ = z;
+
+
+                        cubeGroup.add(cubie);
+                        cubies.push(cubie);
+                    }
+                }
+            }
+            scene.add(cubeGroup);
+        }
+
+
+        // --- Handle Window Resize ---
+        function onWindowResize() {
+            const canvasContainer = document.getElementById('canvas-container');
+            if (!canvasContainer) return; // Exit if container not found
+
+            const width = canvasContainer.clientWidth;
+            const height = canvasContainer.clientHeight;
+
+            if (width > 0 && height > 0) { // Ensure valid dimensions
+                camera.aspect = width / height;
+                camera.updateProjectionMatrix();
+                renderer.setSize(width, height);
+            }
+        }
+
+        // --- Animation Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Process the rotation queue
+            processRotationQueue();
+
+            controls.update(); // only required if controls.enableDamping = true, or if controls.autoRotate = true
+            renderer.render(scene, camera);
+        }
+
+        // --- Face Rotation Logic ---
+        const axisMap = {
+            'F': { axis: 'z', slice: CUBE_DIM - 1, direction: 1 }, 'F\'': { axis: 'z', slice: CUBE_DIM - 1, direction: -1 },
+            'B': { axis: 'z', slice: 0,            direction: -1 }, 'B\'': { axis: 'z', slice: 0,            direction: 1 },
+            'U': { axis: 'y', slice: CUBE_DIM - 1, direction: 1 }, 'U\'': { axis: 'y', slice: CUBE_DIM - 1, direction: -1 },
+            'D': { axis: 'y', slice: 0,            direction: -1 }, 'D\'': { axis: 'y', slice: 0,            direction: 1 },
+            'L': { axis: 'x', slice: 0,            direction: -1 }, 'L\'': { axis: 'x', slice: 0,            direction: 1 },
+            'R': { axis: 'x', slice: CUBE_DIM - 1, direction: 1 }, 'R\'': { axis: 'x', slice: CUBE_DIM - 1, direction: -1 },
+        };
+
+        // Function accessible from HTML buttons
+        window.rotateFace = function(move) {
+            if (isRotating) {
+                 rotationQueue.push(move); // Add to queue if already rotating
+                 return;
+            }
+            startRotation(move);
+        }
+
+         function processRotationQueue() {
+            if (!isRotating && rotationQueue.length > 0) {
+                const nextMove = rotationQueue.shift();
+                startRotation(nextMove);
+            }
+        }
+
+
+        function startRotation(move) {
+            if (!axisMap[move] || isRotating) return; // Invalid move or already rotating
+
+            isRotating = true; // Set rotation flag
+
+            const { axis, slice, direction } = axisMap[move];
+            const angle = direction * Math.PI / 2; // 90 degrees in radians
+
+            const pivot = new THREE.Group(); // Use a Group as a pivot
+            scene.add(pivot); // Add pivot to the scene temporarily
+
+            const cubiesToRotate = [];
+
+            // Find cubies in the specified slice
+            cubies.forEach(cubie => {
+                let coord;
+                if (axis === 'x') coord = cubie.userData.currentX;
+                else if (axis === 'y') coord = cubie.userData.currentY;
+                else if (axis === 'z') coord = cubie.userData.currentZ;
+
+                // Use a small tolerance for floating point comparisons
+                if (Math.abs(coord - slice) < 0.1) {
+                     cubiesToRotate.push(cubie);
+                }
+            });
+
+            // Attach cubies to the pivot
+            cubiesToRotate.forEach(cubie => {
+                // To correctly attach, we need to convert world position to pivot's local space
+                // Since pivot is at (0,0,0) and has no rotation initially, world coordinates are local coords
+                pivot.attach(cubie); // Automatically handles position/rotation adjustments
+            });
+
+
+            // --- Animate the Rotation ---
+            let currentAngle = 0;
+            const targetAngle = angle;
+            const rotationAxis = new THREE.Vector3(
+                axis === 'x' ? 1 : 0,
+                axis === 'y' ? 1 : 0,
+                axis === 'z' ? 1 : 0
+            );
+
+            function performStep() {
+                const angleStep = Math.sign(targetAngle) * ROTATION_SPEED;
+                let nextAngle = currentAngle + angleStep;
+
+                // Clamp to target angle if we overshoot or reach it
+                if ((angleStep > 0 && nextAngle >= targetAngle) || (angleStep < 0 && nextAngle <= targetAngle)) {
+                    const remainingAngle = targetAngle - currentAngle;
+                    pivot.rotateOnWorldAxis(rotationAxis, remainingAngle); // Rotate the final bit
+                    currentAngle = targetAngle; // Mark as finished
+                } else {
+                    pivot.rotateOnWorldAxis(rotationAxis, angleStep);
+                    currentAngle = nextAngle;
+                }
+
+                renderer.render(scene, camera); // Re-render after each step
+
+                if (Math.abs(currentAngle - targetAngle) > 0.001) { // Continue animation if not finished
+                    requestAnimationFrame(performStep);
+                } else {
+                    // --- Finalize Rotation ---
+                    // Detach cubies from pivot and re-attach to the scene (or main cube group)
+                    // Update their logical positions
+                    cubiesToRotate.forEach(cubie => {
+                        // Update world matrix before detaching
+                        cubie.updateMatrixWorld();
+                        scene.attach(cubie); // Re-attach to the main scene
+                        updateLogicalPosition(cubie, axis, direction);
+                    });
+
+                    scene.remove(pivot); // Remove the temporary pivot
+                    isRotating = false; // Clear rotation flag
+                    // Check queue for next move immediately after finishing
+                    // This is handled by the main animate loop calling processRotationQueue
+                }
+            }
+
+            requestAnimationFrame(performStep); // Start the animation steps
+        }
+
+
+        // --- Update Logical Position after Rotation ---
+        function updateLogicalPosition(cubie, axis, direction) {
+            const pos = new THREE.Vector3();
+            // Get the world position relative to the cube's center (which is 0,0,0)
+            pos.setFromMatrixPosition(cubie.matrixWorld);
+
+            // Round the position to the nearest integer coordinate (0, 1, or 2)
+            // Map world coordinates back to logical 0, 1, 2 indices
+            const totalSize = CUBIE_SIZE * CUBE_DIM + CUBIE_GAP * (CUBE_DIM - 1);
+            const offset = (totalSize - CUBIE_SIZE) / 2;
+            const step = CUBIE_SIZE + CUBIE_GAP;
+
+            // It's safer to update logical coords based on the rotation itself
+            const { currentX, currentY, currentZ } = cubie.userData;
+            let newX = currentX, newY = currentY, newZ = currentZ;
+
+            // Rotation matrix for 90 degrees clockwise around an axis
+            // We adjust based on axis and direction
+            const angle = direction * Math.PI / 2;
+            const cos = Math.round(Math.cos(angle)); // Should be 0 or 1/-1
+            const sin = Math.round(Math.sin(angle)); // Should be 1/-1 or 0
+
+            // Center coordinates around origin (1,1,1) for rotation math
+            const cx = currentX - 1;
+            const cy = currentY - 1;
+            const cz = currentZ - 1;
+
+            if (axis === 'x') { // Rotate around X
+                newY = Math.round((cy * cos - cz * sin) + 1);
+                newZ = Math.round((cy * sin + cz * cos) + 1);
+            } else if (axis === 'y') { // Rotate around Y
+                newX = Math.round((cx * cos + cz * sin) + 1);
+                newZ = Math.round((-cx * sin + cz * cos) + 1);
+            } else if (axis === 'z') { // Rotate around Z
+                newX = Math.round((cx * cos - cy * sin) + 1);
+                newY = Math.round((cx * sin + cy * cos) + 1);
+            }
+
+            cubie.userData.currentX = newX;
+            cubie.userData.currentY = newY;
+            cubie.userData.currentZ = newZ;
+
+             // Snap visual position to grid after rotation to correct minor float errors
+             cubie.position.set(
+                 newX * step - offset,
+                 newY * step - offset,
+                 newZ * step - offset
+             );
+             // Snap rotation too - align axes after rotation
+             snapRotation(cubie);
+        }
+
+        // Helper to snap rotation to nearest 90 degrees
+        function snapRotation(object) {
+            const euler = new THREE.Euler().setFromQuaternion(object.quaternion, 'XYZ');
+            euler.x = Math.round(euler.x / (Math.PI / 2)) * (Math.PI / 2);
+            euler.y = Math.round(euler.y / (Math.PI / 2)) * (Math.PI / 2);
+            euler.z = Math.round(euler.z / (Math.PI / 2)) * (Math.PI / 2);
+            object.setRotationFromEuler(euler);
+        }
+
+
+        // --- Start ---
+        init();
+
+    </script>
+</body>
+</html>
